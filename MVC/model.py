@@ -99,6 +99,7 @@ class Model:
 
                 for step in range(int(max_steps)):
                     old_state = self.environment.state
+                    # old_state = np.reshape(old_state, [1, self.state_size])
 
                     exp_exp_tradeoff = random.uniform(0, 1)
 
