@@ -8,7 +8,7 @@ from tensorflow.keras.layers import Dense, Input, Flatten, multiply
 
 from Agents import modelFreeAgent
 from Agents.Collections import ExperienceReplay
-from Agents.Collections.TransitionFrame import TransitionFrame
+from Agents.Collections.Transition_Frame import TransitionFrame
 
 
 tf.keras.backend.set_floatx('float64')

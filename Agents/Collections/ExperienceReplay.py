@@ -1,6 +1,6 @@
 import random
 
-from Agents.Collections import TransitionFrame
+from Agents.Collections import Transition_Frame
 from collections import deque
 
 class ReplayBuffer:
@@ -15,7 +15,7 @@ class ReplayBuffer:
         :param max_length: the max length of this buffer
         :type max_length: int
         :param empty_trans: the empty transition to pad results with
-        :type empty_trans: TransitionFrame
+        :type empty_trans: Transition_Frame
         :param history_length: the length of the history
         :type history_length: int
         """
@@ -31,9 +31,9 @@ class ReplayBuffer:
         Appends a given framed to the buffer.
         :param transition_frame: the transition frame to append to the end
         of this buffer
-        :type transition_frame: TransitionFrame
+        :type transition_frame: Transition_Frame
         """
-        if (not isinstance(transition_frame, TransitionFrame.TransitionFrame)):
+        if (not isinstance(transition_frame, Transition_Frame.TransitionFrame)):
             raise ValueError("Only transition frames can be added to the replay buffer.")
         self._transitions.append(transition_frame)
       
@@ -42,7 +42,7 @@ class ReplayBuffer:
         Returns the last frame if the buffer is non-empty and an empty
         transition frame otherwise.
         :return: the last frame added to the buffer
-        :rtype: TransitionFrame
+        :rtype: Transition_Frame
         """
         if (self._transitions):
             return self._transitions[-1]

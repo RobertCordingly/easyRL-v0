@@ -2,7 +2,7 @@ import numpy as np
 
 from Agents import drqn
 from Agents.Collections import ExperienceReplay
-from Agents.Collections.TransitionFrame import ActionTransitionFrame
+from Agents.Collections.Transition_Frame import ActionTransitionFrame
 
 class ADRQN(drqn.DRQN):
     displayName = 'ADRQN'

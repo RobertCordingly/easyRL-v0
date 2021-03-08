@@ -2,7 +2,7 @@ import numpy as np
 
 from Agents import deepQ
 from Agents.Collections import ExperienceReplay
-from Agents.Collections.TransitionFrame import TransitionFrame
+from Agents.Collections.Transition_Frame import TransitionFrame
 
 
 class DRQN(deepQ.DeepQ):
