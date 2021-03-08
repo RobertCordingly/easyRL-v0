@@ -33,6 +33,7 @@ class Agent(ABC):
         self.action_size = action_size
         self.gamma = gamma
         self.time_steps = 0
+
     
     def get_empty_state(self):
         """
@@ -83,8 +84,9 @@ class Agent(ABC):
         pass
 
     @abstractmethod
-    def memload(self, mem):
+    def memload(self, mem, mem1):
         """Loads a passed Q-function
+        :param mem1:
         :param mem: the Q-function to be loaded
         :return: None
         :rtype: None

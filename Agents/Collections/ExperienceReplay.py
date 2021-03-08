@@ -24,6 +24,7 @@ class ReplayBuffer:
         self.learner = learner
         self.max_length = max_length
         self._transitions = deque(maxlen = max_length)
+
     
     def append_frame(self, transition_frame):
         """
