@@ -136,6 +136,7 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         print("critic optimized")
 
         act = self.actor_model(X_train, training=True)
+        act = tf.convert_to_tensor(act)
         # Train actor
         """actions = self.actor_model(X_train, training=True)
         actions = tf.convert_to_tensor(actions)
@@ -208,7 +209,7 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         Y_train = np.zeros((self.batch_size,) + (self.action_size,))
 
         # self.allBatchMask = self.allBatchMask.astype(float)
-        t_act = self.target_actor(X_train)
+        t_act = self.target_actor(X_train, training=True)
         qnext = self.target_critic([next_states, t_act])
         # qnext = self.target_critic([next_states, self.allBatchMask])
         qnext = np.amax(qnext, 1)
