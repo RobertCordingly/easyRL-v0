@@ -58,20 +58,19 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
 
         self.total_steps = 0
         self.allMask = np.full((1, self.action_size), 1)
-        # self.allBatchMask = np.full((self.batch_size, self.action_size), 1)
+        self.allBatchMask = np.full((self.batch_size, self.action_size), 1)
 
     def get_actor(self):
         # Initialize actor network weights between -3e-3 and 3-e3
         last_in = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
         input_shape = self.state_size
-        inputA = Input(shape=input_shape)
+        inputA = Input(input_shape)
         x = Flatten()(inputA)
         x = Dense(24, activation='relu')(x)  # fully connected
         x = Dense(24, activation='relu')(x)
         x = Dense(1, activation='linear', kernel_initializer=last_in)(x)
         model = Model(inputs=inputA, outputs=x)
         model.compile(loss='mse', optimizer=self.actor_optimizer)
-        print("actor model created")
         return model
 
     def get_critic(self):
@@ -86,7 +85,6 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         outputs = multiply([x, inputB])
         model = Model(inputs=[inputA, inputB], outputs=outputs)
         model.compile(loss='mse', optimizer=self.critic_optimizer)
-        print ("critic model created")
         return model
 
     def ou_noise(self, a, p=0.15, mu=0, differential=1e-1, sigma=0.2, dim=1):
@@ -98,16 +96,13 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         bg_noise = np.zeros(self.action_size)
         bg_noise = self.ou_noise(bg_noise, dim=self.action_size)
         u = self.predict(state, False)
-        # u = self.actor_model(state)[0]
         sampled_actions = tf.squeeze(u)
         sampled_actions = sampled_actions.numpy() + bg_noise
         # Clipping action between bounds -0.3 and 0.3
         legal_action = np.clip(sampled_actions, -0.3, 0.3)[0]
         legal_action = np.squeeze(legal_action)
         action_returned = legal_action.astype(int)
-        # print(legal_action.dtype)
-        # print(action_returned.dtype)
-        print("action_returned")
+        print("action chosen")
         return action_returned
 
     def sample(self):
@@ -122,70 +117,70 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         loss = 0
 
         if len(self.memory) < 2*self.batch_size:
-            print("loss = 0")
+            # print("loss = 0")
             return loss
         mini_batch = self.sample()
-        X_train, Y_train = self.learn(mini_batch)
+        X_train, Y_train, states = self.learn(mini_batch)
 
         # Train critic
         with tf.GradientTape() as tape:
-            critic_value = self.critic_model(X_train, training=True)
+            critic_value = self.critic_model([X_train, self.allBatchMask])
             critic_loss = tf.math.reduce_mean(tf.math.square(Y_train - critic_value))
         critic_grad = tape.gradient(critic_loss, self.critic_model.trainable_variables)
         self.critic_optimizer.apply_gradients(zip(critic_grad, self.critic_model.trainable_variables))
-        print("critic optimized")
 
-        act = self.actor_model(X_train, training=True)
-        act = tf.convert_to_tensor(act)
-        # Train actor
-        """actions = self.actor_model(X_train, training=True)
-        actions = tf.convert_to_tensor(actions)
-        with tf.GradientTape() as tape:
+        self.allBatchMask = self.allBatchMask.astype(float)
+        # actions = self.predict(states, False)
+        # actions = tf.convert_to_tensor(actions)
+        o = self.critic_grads(states, self.allBatchMask)
+        print (o.shape)
+        #o = tf.reshape(o, [-1, 24])
+        # with tf.GradientTape() as tape:
             # tape.watch(actions)
-            critic_values = self.critic_model([X_train, actions])
-            # critic_values = self.critic_model([X_train, actions])
-            critic_values = tf.squeeze(critic_values)
+            # critic_values = self.critic_model([states, self.allBatchMask])  #input 3
+            # critic_values = tf.squeeze(critic_values)
+            # grad = tape.gradient(critic_values, self.critic_model.trainable_variables)
 
         # Computing gradients using critic value"""
-        critic_value = self.critic_model([X_train, act], training=True)
-        critic_value = tf.squeeze(critic_value)
         with tf.GradientTape() as tape:
-            # Used `-value` as we want to maximize the value given
-            # by the critic for our actions
-            # actor_loss = -tf.math.reduce_mean(critic_value)
-            grad = tape.gradient(critic_value, act)
-            print(grad)
-        with tf.GradientTape() as tape:
-            actor_grad = tape.gradient(self.actor_model(X_train), self.actor_model.trainable_variables, grad)
+            actor_grad = tape.gradient(self.predict(states, False), self.actor_model.trainable_variables)
+
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor_model.trainable_variables))
-        print("actor optimized")
+        # print("actor optimized")
         self.updateTarget()
         return critic_loss
 
     def updateTarget(self):
-        # if self.total_steps >= 2*self.batch_size and self.total_steps % self.target_update_interval == 0:
+        if self.total_steps >= 2*self.batch_size and self.total_steps % self.target_update_interval == 0:
             # self.target_actor.set_weights(self.actor_model.get_weights())
             # self.target_critic.set_weights(self.critic_model.get_weights())
 
-        for ind in range(len(self.actor_model.get_weights())):
-          self.target_actor.get_weights()[ind] = self.tau * self.actor_model.get_weights()[ind] + (1 - self.tau) * self.target_actor.get_weights()[ind]
-        print("target actor updated")
+            actor_weights = self.actor_model.get_weights()
+            t_actor_weights = self.target_actor.get_weights()
+            critic_weights = self.critic_model.get_weights()
+            t_critic_weights = self.target_critic.get_weights()
 
-        for ind in range(len(self.critic_model.get_weights())):
-            self.target_critic.get_weights()[ind] = self.tau * self.critic_model.get_weights()[ind] + (1 - self.tau) * self.target_critic.get_weights()[ind]
-        print("target critic updated")
-        self.total_steps += 1
+            for i in range(len(actor_weights)):
+                t_actor_weights[i] = self.tau * actor_weights[i] + (1 - self.tau) * t_actor_weights[i]
+
+            for i in range(len(critic_weights)):
+                t_critic_weights[i] = self.tau * critic_weights[i] + (1 - self.tau) * t_critic_weights[i]
+
+            self.target_actor.set_weights(t_actor_weights)
+            self.target_critic.set_weights(t_critic_weights)
+            print("targets updated")
+            self.total_steps += 1
 
 
     def predict(self, state, isTarget):
 
-        shape = (1,) + self.state_size
+        shape = (-1,) + self.state_size
         state = np.reshape(state, shape)
         # state = tf.cast(state, dtype=tf.float32)
         if isTarget:
-            result = self.target_actor([state, self.allMask])
+            result = self.target_actor([state])
         else:
-            result = self.actor_model([state, self.allMask])
+            result = self.actor_model([state])
         return result
 
     def create_one_hot(self, vector_length, hot_index):
@@ -199,27 +194,28 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
     def learn(self, mini_batch):
 
         X_train = [np.zeros((self.batch_size,) + self.state_size), np.zeros((self.batch_size,) + (self.action_size,))]
+        states = (np.zeros((self.batch_size,) + self.state_size))
         next_states = (np.zeros((self.batch_size,) + self.state_size))
+
 
         for index_rep, transition in enumerate(mini_batch):
             X_train[0][index_rep] = transition.state
+            states[index_rep] = transition.state
             X_train[1][index_rep] = self.create_one_hot(self.action_size, transition.action)
+            # print(actions.shape)
             next_states[index_rep] = transition.next_state
 
         Y_train = np.zeros((self.batch_size,) + (self.action_size,))
 
-        # self.allBatchMask = self.allBatchMask.astype(float)
-        t_act = self.target_actor(X_train, training=True)
-        qnext = self.target_critic([next_states, t_act])
-        # qnext = self.target_critic([next_states, self.allBatchMask])
+        self.allBatchMask = self.allBatchMask.astype(float)
+
+        qnext = self.target_critic([next_states, self.allBatchMask])
         qnext = np.amax(qnext, 1)
         for index_rep, transition in enumerate(mini_batch):
             if transition.is_done:
                 Y_train[index_rep][transition.action] = transition.reward
             else:
                 Y_train[index_rep][transition.action] = transition.reward + qnext[index_rep] * self.gamma
-
-
 
         # c_loss = -tf.math.reduce_mean(critic_values)
         """c_loss = tf.math.reduce_mean(tf.math.square(Y_train - critic_values))
@@ -232,24 +228,21 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         print(actor_grad)
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor_model.trainable_variables))"""
 
-
-
-
         """with tf.GradientTape() as tape:
             with tf.GradientTape() as tape:
                 grads = tape.gradient(c_loss, self.critic_model.trainable_variables)
                 # actor_grad = tape.gradient(self.actor_model(X_train), self.actor_model.trainable_variables, grads)
                 actor_grad = tape.gradient(self.actor_model(X_train), self.actor_model.trainable_variables, grads)"""
 
-        return X_train, Y_train
+        return X_train, Y_train, states
 
-    """def critic_grads(self, states, actions):
+    def critic_grads(self, states, actions):
         actions = tf.convert_to_tensor(actions)
         with tf.GradientTape() as tape:
             tape.watch(actions)
             critic_value = self.critic_model([states, actions])
             critic_value = tf.squeeze(critic_value)
-        return tape.gradient(critic_value, actions)"""
+        return tape.gradient(critic_value, actions)
 
     def save(self, filename):
         mem = self.critic_model.get_weights()
