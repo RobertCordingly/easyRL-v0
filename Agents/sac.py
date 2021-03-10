@@ -285,7 +285,7 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         # Computing the gradients with the tapes and applying them
         softq_gradients = softq_tape.gradient(softq_loss, self.softq_network.trainable_weights)
         softq_gradients2 = softq_tape2.gradient(softq_loss2, self.softq_network2.trainable_weights)
-        actor_gradients = actor_tape.gradient(actor_loss, self.actor_network.trainable_weights)
+        actor_gradients = actor_tape.gradient(actor_loss, self.actor_network.trainable_variables)
 
         # Minimize gradients wrt weights
         self.actor_optimizer.apply_gradients(zip(actor_gradients, self.actor_network.trainable_weights))
