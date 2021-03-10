@@ -68,7 +68,7 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         x = Flatten()(inputA)
         x = Dense(24, activation='relu')(x)  # fully connected
         x = Dense(24, activation='relu')(x)
-        x = Dense(1, activation='linear', kernel_initializer=last_in)(x)
+        x = Dense(self.action_size, activation='linear', kernel_initializer=last_in)(x)
         model = Model(inputs=inputA, outputs=x)
         model.compile(loss='mse', optimizer=self.actor_optimizer)
         return model
@@ -81,7 +81,7 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         x = Flatten()(inputA)
         x = Dense(24, input_dim=self.state_size, activation='relu')(x)  # fully connected
         x = Dense(24, activation='relu')(x)
-        x = Dense(self.action_size, activation='linear')(x)
+        x = Dense(1, activation='linear')(x)
         outputs = multiply([x, inputB])
         model = Model(inputs=[inputA, inputB], outputs=outputs)
         model.compile(loss='mse', optimizer=self.critic_optimizer)
@@ -102,7 +102,10 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         legal_action = np.clip(sampled_actions, -0.3, 0.3)[0]
         legal_action = np.squeeze(legal_action)
         action_returned = legal_action.astype(int)
+<<<<<<< HEAD
         print("action chosen")
+=======
+>>>>>>> eabd82759112566fbd77934b5758c926b2afd5dd
         return action_returned
 
     def sample(self):
@@ -117,7 +120,10 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         loss = 0
 
         if len(self.memory) < 2*self.batch_size:
+<<<<<<< HEAD
             # print("loss = 0")
+=======
+>>>>>>> eabd82759112566fbd77934b5758c926b2afd5dd
             return loss
         mini_batch = self.sample()
         X_train, Y_train, states = self.learn(mini_batch)
@@ -142,19 +148,33 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
             # grad = tape.gradient(critic_values, self.critic_model.trainable_variables)
 
         # Computing gradients using critic value"""
+<<<<<<< HEAD
+=======
+        critic_value = self.critic_model([X_train, act], training=True)
+        critic_value = tf.squeeze(critic_value)
+        with tf.GradientTape() as tape:
+            # Used `-value` as we want to maximize the value given
+            # by the critic for our actions
+            # actor_loss = -tf.math.reduce_mean(critic_value)
+            grad = tape.gradient(critic_value, act)
+>>>>>>> eabd82759112566fbd77934b5758c926b2afd5dd
         with tf.GradientTape() as tape:
             actor_grad = tape.gradient(self.predict(states, False), self.actor_model.trainable_variables)
 
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor_model.trainable_variables))
+<<<<<<< HEAD
         # print("actor optimized")
+=======
+>>>>>>> eabd82759112566fbd77934b5758c926b2afd5dd
         self.updateTarget()
-        return critic_loss
+        return critic_loss.numpy()
 
     def updateTarget(self):
         if self.total_steps >= 2*self.batch_size and self.total_steps % self.target_update_interval == 0:
             # self.target_actor.set_weights(self.actor_model.get_weights())
             # self.target_critic.set_weights(self.critic_model.get_weights())
 
+<<<<<<< HEAD
             actor_weights = self.actor_model.get_weights()
             t_actor_weights = self.target_actor.get_weights()
             critic_weights = self.critic_model.get_weights()
@@ -170,6 +190,14 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
             self.target_critic.set_weights(t_critic_weights)
             print("targets updated")
             self.total_steps += 1
+=======
+        for ind in range(len(self.actor_model.get_weights())):
+          self.target_actor.get_weights()[ind] = self.tau * self.actor_model.get_weights()[ind] + (1 - self.tau) * self.target_actor.get_weights()[ind]
+
+        for ind in range(len(self.critic_model.get_weights())):
+            self.target_critic.get_weights()[ind] = self.tau * self.critic_model.get_weights()[ind] + (1 - self.tau) * self.target_critic.get_weights()[ind]
+        self.total_steps += 1
+>>>>>>> eabd82759112566fbd77934b5758c926b2afd5dd
 
 
     def predict(self, state, isTarget):
@@ -220,12 +248,9 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
         # c_loss = -tf.math.reduce_mean(critic_values)
         """c_loss = tf.math.reduce_mean(tf.math.square(Y_train - critic_values))
             grads = tape.gradient(c_loss, self.critic_model.trainable_variables)
-        print(c_loss)
-        print(grads)
         with tf.GradientTape() as tape:
             # actor_grad = tape.gradient(self.actor_model(X_train), self.actor_model.trainable_variables, grads)
             actor_grad = tape.gradient(self.actor_model(X_train), self.actor_model.trainable_variables, grads)
-        print(actor_grad)
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor_model.trainable_variables))"""
 
         """with tf.GradientTape() as tape:
