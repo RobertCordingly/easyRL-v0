@@ -1,7 +1,7 @@
 import joblib
 import tensorflow as tf
 from typing import Sequence
-from tensorflow.keras.models import Model
+from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras.layers import Dense, Input, Flatten, multiply
 import numpy as np
 
@@ -11,31 +11,66 @@ from Agents.Collections.Transition_Frame import TransitionFrame
 
 tf.keras.backend.set_floatx('float64')
 
+# Class to create Actor Network
+class actorNetwork(Model):
+    def __init__(self, action_dim):
+        super(actorNetwork, self).__init__()
+        self.logprob_epsilon = 1e-6
+        actor_bound = 3e-3
+        self.network = Sequential()
+        for i in range(2):
+            self.network.add(Dense(24, activation="relu"))
 
-def soft_update(source_vars: Sequence[tf.Variable], target_vars: Sequence[tf.Variable], tau: float) -> None:
-    """Move each source variable by a factor of tau towards the corresponding target variable.
-    Arguments:
-        source_vars {Sequence[tf.Variable]} -- Source variables to copy from
-        target_vars {Sequence[tf.Variable]} -- Variables to copy data to
-        tau {float} -- How much to change to source var, between 0 and 1.
-    """
-    if len(source_vars) != len(target_vars):
+        self.mean = Dense(action_dim,
+                          kernel_initializer=tf.random_uniform_initializer(-actor_bound, actor_bound),
+                          bias_initializer=tf.random_uniform_initializer(-actor_bound, actor_bound))
+        self.prob = Dense(action_dim,
+                             kernel_initializer=tf.random_uniform_initializer(-actor_bound, actor_bound),
+                             bias_initializer=tf.random_uniform_initializer(-actor_bound, actor_bound))
+
+    @tf.function
+    def call(self, inp):
+        x = self.network(inp)
+        mean = self.mean(x)
+        log_std = self.prob(x)
+        prob_clipped = tf.clip_by_value(log_std, -20, 2)
+        normal_dist = tf.compat.v1.distributions.Normal(mean, tf.exp(prob_clipped))
+        action = tf.stop_gradient(normal_dist.sample())
+        action_returned = tf.tanh(action)
+        prob = normal_dist.log_prob(action) - tf.math.log(1.0 - tf.pow(action_returned, 2) + self.logprob_epsilon)
+        prob = tf.reduce_sum(prob, axis=-1, keepdims=True)
+        return action_returned, prob
+
+    def _get_params(self):
+        ''
+        with self.graph.as_default():
+            parameters = tf.trainable_variables()
+        name = [s.name for s in parameters]
+        value_return = self.sess.run(parameters)
+        params = {k: v for k, v in zip(name, value_return)}
+        return params
+
+    def __getstate__(self):
+        params = self._get_params()
+        state = self.args_copy, params
+        return state
+
+    def __setstate__(self, state):
+        args, params = state
+        self.__init__(**args)
+        self.restore_params(params)
+
+
+def soft_update(source: Sequence[tf.Variable], target: Sequence[tf.Variable], tau: float):
+    if len(source) != len(target):
         raise ValueError("source_vars and target_vars must have the same length.")
-    for source, target in zip(source_vars, target_vars):
-        # target = tf.cast(target, float)
-        # source = tf.cast(source, float)
-        # print(source.dtype)
+    for source, target in zip(source, target):
         target.assign((1.0 - tau) * target + tau * source)
+    return target
 
 
-def hard_update(source_vars: Sequence[tf.Variable], target_vars: Sequence[tf.Variable]):
-    """Copy source variables to target variables.
-       Arguments:
-           source_vars {Sequence[tf.Variable]} -- Source variables to copy from
-           target_vars {Sequence[tf.Variable]} -- Variables to copy data to
-       """
-    # Tau of 1, so get everything from source and keep nothing from target
-    soft_update(source_vars, target_vars, 1.0)
+def force_update(source: Sequence[tf.Variable], target: Sequence[tf.Variable]):
+    soft_update(source, target, 1.0)
 
 
 class SAC(modelFreeAgent.ModelFreeAgent):
@@ -60,9 +95,10 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         paramLen = len(SAC.newParameters)
         super().__init__(*args[:-paramLen])
 
-        self.batch_size, self.memory_size, self.target_update_interval, self.tau, self.temperature = [int(arg) for arg in args[-paramLen:]]
-        self.logprob_epsilon = 1e-6  # For numerical stability when computing tf.log
-        self.polyak_coef = 0.01
+        self.batch_size, self.memory_size, self.target_update_interval, self.tau, self.temperature = [int(arg) for arg
+                                                                                                      in
+                                                                                                      args[-paramLen:]]
+        self.polyak = 0.01
         self.total_steps = 0
 
         empty_state = self.get_empty_state()
@@ -75,90 +111,30 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         self.critic_optimizer = tf.keras.optimizers.Adam(critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(actor_lr)
 
-        self.actor_network = self.actorModel()
+        self.actor_network = actorNetwork(self.action_size)
 
-        self.softq_network = self.q_network()
-        self.softq_target_network = self.q_network()
+        self.soft_Q_network = self.q_network()
+        self.soft_Q_targetnetwork = self.q_network()
 
-        self.softq_network2 = self.q_network()
-        self.softq_target_network2 = self.q_network()
+        self.soft_Q_network1 = self.q_network()
+        self.soft_Q_targetnetwork1 = self.q_network()
 
         # Building up 2 soft q-function with their relative targets
-        input1 = tf.keras.Input(shape=self.state_size, dtype=tf.float64)
-        input2 = tf.keras.Input(shape=self.action_size, dtype=tf.float64)
+        in1 = tf.keras.Input(shape=self.state_size, dtype=tf.float64)
+        in2 = tf.keras.Input(shape=self.action_size, dtype=tf.float64)
 
-        self.softq_network([input1, input2])
-        self.softq_target_network([input1, input2])
-        hard_update(self.softq_network.variables, self.softq_target_network.variables)
+        self.soft_Q_network([in1, in2])
+        self.soft_Q_targetnetwork([in1, in2])
+        force_update(self.soft_Q_network.variables, self.soft_Q_targetnetwork.variables)
 
-        self.softq_network2([input1, input2])
-        self.softq_target_network2([input1, input2])
-        hard_update(self.softq_network2.variables, self.softq_target_network2.variables)
+        self.soft_Q_network1([in1, in2])
+        self.soft_Q_targetnetwork1([in1, in2])
+        force_update(self.soft_Q_network1.variables, self.soft_Q_targetnetwork1.variables)
 
         # Optimizers for the networks
         self.softq_optimizer = tf.keras.optimizers.Adam(learning_rate=critic_lr)
         self.softq_optimizer2 = tf.keras.optimizers.Adam(learning_rate=critic_lr)
         self.actor_optimizer = tf.keras.optimizers.Adam(learning_rate=actor_lr)
-
-        self.allMask = np.full((1, self.action_size), 1)
-        self.allBatchMask = np.full((self.batch_size, self.action_size), 1)
-
-    def callqFunc(self):
-        # Building up 2 soft q-function with their relative targets
-        input1 = tf.keras.Input(shape=self.state_size, dtype=tf.float64)
-        input2 = tf.keras.Input(shape=self.action_size, dtype=tf.float64)
-        return self.softq_target_network([input1, input2])
-
-    def callqFunc2(self):
-        # Building up 2 soft q-function with their relative targets
-        input1 = tf.keras.Input(shape=self.state_size, dtype=tf.float64)
-        input2 = tf.keras.Input(shape=self.action_size, dtype=tf.float64)
-        return self.softq_network([input1, input2])
-
-    def callqFunc3(self):
-        # Building up 2 soft q-function with their relative targets
-        input1 = tf.keras.Input(shape=self.state_size, dtype=tf.float64)
-        input2 = tf.keras.Input(shape=self.action_size, dtype=tf.float64)
-        return self.softq_network2([input1, input2])
-
-    def actorModel(self):
-        w_bound = 3e-3
-
-        input_shape = self.state_size
-        inputA = Input(input_shape)
-        x = Flatten()(inputA)
-        x = Dense(24, activation='relu')(x)  # fully connected
-        x = Dense(24, activation='relu')(x)
-        mean = Dense(self.action_size, kernel_initializer=tf.random_uniform_initializer(-w_bound, w_bound), bias_initializer=tf.random_uniform_initializer(-w_bound, w_bound))(x)
-        log_std = Dense(self.action_size, kernel_initializer=tf.random_uniform_initializer(-w_bound, w_bound))(x)
-        log_std_clipped = tf.clip_by_value(log_std, -20, 2)
-        normal_dist = tf.compat.v1.distributions.Normal(mean, tf.exp(log_std_clipped))
-        action = tf.stop_gradient(normal_dist.sample())
-        squashed_actions = tf.tanh(action)
-        logprob = normal_dist.log_prob(action) - tf.math.log(1.0 - tf.pow(squashed_actions, 2) + self.logprob_epsilon)
-        logprob = tf.reduce_sum(logprob, axis=-1, keepdims=True)
-
-        return squashed_actions, logprob
-
-
-    """def actorModel1(self, state):
-        w_bound = 3e-3
-
-        input_shape = self.state_size
-        inputA = Input(input_shape)
-        x = Flatten()(inputA)
-        x = Dense(24, activation='relu')(x)  # fully connected
-        x = Dense(24, activation='relu')(x)
-        mean = Dense(self.action_size, kernel_initializer=tf.random_uniform_initializer(-w_bound, w_bound), bias_initializer=tf.random_uniform_initializer(-w_bound, w_bound))(x)
-        log_std = Dense(self.action_size, kernel_initializer=tf.random_uniform_initializer(-w_bound, w_bound))(x)
-        log_std_clipped = tf.clip_by_value(log_std, -20, 2)
-        normal_dist = tf.compat.v1.distributions.Normal(mean, tf.exp(log_std_clipped))
-        action = tf.stop_gradient(normal_dist.sample())
-        squashed_actions = tf.tanh(action)
-        logprob = normal_dist.log_prob(action) - tf.math.log(1.0 - tf.pow(squashed_actions, 2) + self.logprob_epsilon)
-        logprob = tf.reduce_sum(logprob, axis=-1, keepdims=True)
-
-        return logprob"""
 
     def q_network(self):
         # Generate critic network model
@@ -186,37 +162,29 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         model.compile(loss='mse', optimizer=self.critic_optimizer)
         return model
 
-    def ou_noise(self, a, p=0.15, mu=0, differential=1e-1, sigma=0.2, dim=1):
-        # Exploration noise generation
-        return a + p * (mu - a) * differential + sigma * np.sqrt(differential) * np.random.normal(size=dim)
+    def soft_q_value(self, states: np.ndarray, actions: np.ndarray):
+        return self.soft_Q_network(states, actions)
 
-    def softq_value(self, states: np.ndarray, actions: np.ndarray):
-        return self.softq_network(states, actions)
+    def soft_q_value1(self, states: np.ndarray, actions: np.ndarray):
+        return self.soft_Q_network1(states, actions)
 
-    def softq_value2(self, states: np.ndarray, actions: np.ndarray):
-        return self.softq_network2(states, actions)
+    def action(self, states):
+        """Get action for a state."""
+        return self.actor_network(states)[0][0]
 
-    # def actions(self, states: np.ndarray) -> np.ndarray:
-       #  """Get the actions for a batch of states."""
-       # return self.actor_network(states)[0]
+    def actions(self, states):
+        """Get actions for a batch of states."""
+        return self.actor_network(states)[0]
 
     def choose_action(self, state):
         """Get the action for a single state."""
-        bg_noise = np.zeros(self.action_size)
-        bg_noise = self.ou_noise(bg_noise, dim=self.action_size)
-        u, v = self.predict(state, False)
-        sampled_actions = u.np.ndarray
-        sampled_actions = np.squeeze(sampled_actions)
-        sampled_actions = sampled_actions + bg_noise
-        # Clipping action between bounds -0.3 and 0.3
-        legal_action = np.clip(sampled_actions, -0.3, 0.3)[0]
-        legal_action = np.squeeze(legal_action)
-        action_returned = legal_action.astype(int)
-        print("action chosen")
-        return action_returned
 
-    # def step(self, obs):
-        # return self.actor_network(obs)[0]
+        shape = (-1,) + self.state_size
+        state = np.reshape(state, shape)
+        u = self.action(state)
+        action_returned = u.numpy()[0]
+        action_returned = action_returned.astype(int)
+        return action_returned
 
     def sample(self):
         return self.memory.sample(self.batch_size)
@@ -229,81 +197,63 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         self.addToMemory(state, action, reward, new_state, done)
         loss = 0
 
-        if len(self.memory) < 2*self.batch_size:
-            # print("loss = 0")
+        if len(self.memory) < 2 * self.batch_size:
             return loss
         mini_batch = self.sample()
         states, actions, next_states, rewards, dones = self.learn(mini_batch)
         states = states.astype(float)
         next_states = next_states.astype(float)
 
-        # Computing action and a_tilde
-        action = self.actorModel()
-        action_logprob2 = self.actor_network(states)
-        print(states.shape)
-        print(actions.shape)
-        print(self.allBatchMask.shape)
+        # Evaluating action probability of doing an action
+        action, action_prob = self.actor_network(states)
 
-        input1 = tf.keras.Input(shape=self.state_size, dtype=tf.float64)
-        input2 = tf.keras.Input(shape=self.action_size, dtype=tf.float64)
+        val_target = self.soft_Q_network([next_states, actions])
+        val_target1 = self.soft_Q_network1([next_states, actions])
 
-        value_target1 = self.softq_network([input1, input2])
-        value_target2 = self.softq_network2([input1, input2])
+        # Minimizing values
+        nextval_sample = tf.math.minimum(val_target, val_target1) - self.temperature * action_prob
 
-        # Taking the minimum of the q-functions values
-        next_value_batch = tf.math.minimum(value_target1, value_target2) - self.temperature * action_logprob2
-
-        # Computing target for q-functions
-        softq_targets = rewards + self.gamma * (1 - dones) * tf.reshape(next_value_batch, [-1])
+        # Getting Q function targets
+        Q_targets = rewards + self.gamma * (1 - dones) * nextval_sample
         # softq_targets = tf.reshape(softq_targets, [self.batch_size, 1])
 
-        # Gradient descent for the first q-function
-        with tf.GradientTape() as softq_tape:
-            softq = self.softq_network([input1, input2])
-            softq_loss = tf.reduce_mean(tf.square(softq - softq_targets))
+        # Gradient descent for Q function - 1 and computing gradients
+        with tf.GradientTape() as qtape:
+            Q = self.soft_Q_network([states, actions])
+            Q_loss= tf.reduce_mean(tf.square(Q - Q_targets))
+        softq_gradients = qtape.gradient(Q_loss, self.soft_Q_network.trainable_weights)
 
-        # Gradient descent for the second q-function
-        with tf.GradientTape() as softq_tape2:
-            softq2 = self.softq_network2([input1, input2])
-            softq_loss2 = tf.reduce_mean(tf.square(softq2 - softq_targets))
+        # Gradient descent for Q function - 2 and computing gradients
+        with tf.GradientTape() as qtape2:
+            Q2 = self.soft_Q_network1([states, actions])
+            Q2_loss = tf.reduce_mean(tf.square(Q2 - Q_targets))
+        softq_gradients2 = qtape2.gradient(Q2_loss, self.soft_Q_network1.trainable_weights)
 
-        # Gradient ascent for the policy (actor)
-        with tf.GradientTape() as actor_tape:
+        # Gradient ascent for policy and computing gradients
+        with tf.GradientTape() as tape:
             # actions = self.actorModel()
             actions, action_logprob = self.actor_network(states)
-            new_softq = tf.math.minimum(self.softq_network([input1, input2]), self.softq_network2([input1, input2]))
+            soft_Q = tf.math.minimum(self.soft_Q_network([states, actions]), self.soft_Q_network1([states, actions]))
 
-            # Loss implementation from the pseudocode -> works worse
-            # actor_loss = tf.reduce_mean(action_logprob - new_softq)
+            # Calculating loss
+            loss_policy = tf.reduce_mean(action_logprob - soft_Q)
+        actor_gradients = tape.gradient(loss_policy, self.actor_network.trainable_weights)
 
-            # New actor_loss -> works better
-            advantage = tf.stop_gradient(action_logprob - new_softq)
-            actor_loss = tf.reduce_mean(action_logprob * advantage)
-
-        # print(self.actorModel.layers[0].trainable_weights)
-
-        # Computing the gradients with the tapes and applying them
-        softq_gradients = softq_tape.gradient(softq_loss, self.softq_network.trainable_weights)
-        softq_gradients2 = softq_tape2.gradient(softq_loss2, self.softq_network2.trainable_weights)
-        actor_gradients = actor_tape.gradient(actor_loss, self.actor_network.trainable_variables)
-
-        # Minimize gradients wrt weights
+        # Apply gradients
         self.actor_optimizer.apply_gradients(zip(actor_gradients, self.actor_network.trainable_weights))
-        self.softq_optimizer.apply_gradients(zip(softq_gradients, self.softq_network.trainable_weights))
-        self.softq_optimizer2.apply_gradients(zip(softq_gradients2, self.softq_network2.trainable_weights))
-
-        # Computing mean and variance of soft-q function
-        # softq_mean, softq_variance = tf.nn.moments(softq, axes=[0])
+        self.softq_optimizer.apply_gradients(zip(softq_gradients, self.soft_Q_network.trainable_weights))
+        self.softq_optimizer2.apply_gradients(zip(softq_gradients2, self.soft_Q_network1.trainable_weights))
 
         self.updateTarget()
-        return softq_loss, actor_loss
-        # tf.reduce_mean(action_logprob), softq_mean[0], tf.sqrt(softq_variance[0]),
+        return Q_loss, loss_policy
 
     def updateTarget(self):
         if self.total_steps >= 2 * self.batch_size and self.total_steps % self.target_update_interval == 0:
-            # Update the weights of the soft q-function target networks
-            soft_update(self.softq_network.variables, self.softq_target_network.variables, self.polyak_coef)
-            soft_update(self.softq_network2.variables, self.softq_target_network2.variables, self.polyak_coef)
+            # Update the weights of target networks
+            soft_update(self.soft_Q_network.variables, self.soft_Q_targetnetwork.variables, self.polyak)
+            soft_update(self.soft_Q_network1.variables, self.soft_Q_targetnetwork1.variables, self.polyak)
+            print("targets updated")
+        self.total_steps += 1
 
     def create_one_hot(self, vector_length, hot_index):
         output = np.zeros(vector_length)
@@ -313,7 +263,6 @@ class SAC(modelFreeAgent.ModelFreeAgent):
 
     def learn(self, mini_batch):
 
-        # X_train = [np.zeros((self.batch_size,) + self.state_size), np.zeros((self.batch_size,) + (self.action_size,))]
         states = (np.zeros((self.batch_size,) + self.state_size))
         actions = np.zeros((self.batch_size,) + (self.action_size,))
         next_states = (np.zeros((self.batch_size,) + self.state_size))
@@ -337,9 +286,8 @@ class SAC(modelFreeAgent.ModelFreeAgent):
 
         if isTarget:
             print("Target achieved")
-            # result = self.q_network([state])
         else:
-            result1 = self.actor_network(state)
+            result1 = self.action(state)
 
         return result1
 
@@ -349,25 +297,22 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         print('Model saved')
 
     def load(self, filename):
-        name, mem = joblib.load(filename)
+        name, mem, mem1 = joblib.load(filename)
         if name != SAC.displayName:
             print('load failed')
         else:
             self.actor_network.set_weights(mem)
-            # self.target.set_weights(mem)
+            self.soft_Q_targetnetwork.set_weights(mem1)
+            self.soft_Q_targetnetwork1.set_weights(mem1)
+
 
     def memsave(self):
         return self.actor_network.get_weights()
 
-    def memload(self, mem):
+    def memload(self, mem, mem1):
         self.actor_network.set_weights(mem)
-        # self.target.set_weights(mem)
+        self.soft_Q_targetnetwork.set_weights(mem1)
+        self.soft_Q_targetnetwork1.set_weights(mem1)
 
     def reset(self):
         pass
-
-
-
-
-
-
