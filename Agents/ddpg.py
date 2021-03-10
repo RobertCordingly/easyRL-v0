@@ -272,9 +272,9 @@ class DDPG(modelFreeAgent.ModelFreeAgent):
             # self.target_critic.set_weights(t_crit)
 
     def memsave(self):
-        actor_weights = self.actor_model.model.get_weights()
+        actor_weights = self.actor_model.get_weights()
         # target_a_wt = self.target_actor.model.get_weights()
-        critic_weights = self.critic_model.model.get_weights()
+        critic_weights = self.critic_model.get_weights()
         # target_c_wt = self.target_critic.model.get_weights()
 
         return actor_weights, critic_weights
