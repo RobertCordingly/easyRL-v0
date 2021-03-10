@@ -244,8 +244,9 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         self.softq_optimizer.apply_gradients(zip(softq_gradients, self.soft_Q_network.trainable_weights))
         self.softq_optimizer2.apply_gradients(zip(softq_gradients2, self.soft_Q_network1.trainable_weights))
 
+        Q_loss = Q_loss.numpy()
         self.updateTarget()
-        return Q_loss, loss_policy
+        return Q_loss
 
     def updateTarget(self):
         if self.total_steps >= 2 * self.batch_size and self.total_steps % self.target_update_interval == 0:
