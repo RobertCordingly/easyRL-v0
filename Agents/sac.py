@@ -235,7 +235,7 @@ class SAC(modelFreeAgent.ModelFreeAgent):
             actions, action_logprob = self.actor_network(states)
             soft_Q = tf.math.minimum(self.soft_Q_network([X_train]), self.soft_Q_network1([X_train]))
 
-            # Calculating loss
+            # Calculating loss of policy network
             loss_policy = tf.reduce_mean(action_logprob - soft_Q)
         actor_gradients = tape.gradient(loss_policy, self.actor_network.trainable_weights)
 
