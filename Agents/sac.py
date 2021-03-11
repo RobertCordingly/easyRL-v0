@@ -200,15 +200,15 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         if len(self.memory) < 2 * self.batch_size:
             return loss
         mini_batch = self.sample()
-        states, actions, next_states, rewards, dones = self.learn(mini_batch)
+        X_train, states, next_states, rewards, dones = self.learn(mini_batch)
         states = states.astype(float)
         next_states = next_states.astype(float)
 
         # Evaluating action probability of doing an action
         action, action_prob = self.actor_network(states)
 
-        val_target = self.soft_Q_network([next_states, actions])
-        val_target1 = self.soft_Q_network1([next_states, actions])
+        val_target = self.soft_Q_network([X_train])
+        val_target1 = self.soft_Q_network1([X_train])
 
         # Minimizing values
         nextval_sample = tf.math.minimum(val_target, val_target1) - self.temperature * action_prob
@@ -219,13 +219,13 @@ class SAC(modelFreeAgent.ModelFreeAgent):
 
         # Gradient descent for Q function - 1 and computing gradients
         with tf.GradientTape() as qtape:
-            Q = self.soft_Q_network([states, actions])
+            Q = self.soft_Q_network([X_train])
             Q_loss= tf.reduce_mean(tf.square(Q - Q_targets))
         softq_gradients = qtape.gradient(Q_loss, self.soft_Q_network.trainable_weights)
 
         # Gradient descent for Q function - 2 and computing gradients
         with tf.GradientTape() as qtape2:
-            Q2 = self.soft_Q_network1([states, actions])
+            Q2 = self.soft_Q_network1([X_train])
             Q2_loss = tf.reduce_mean(tf.square(Q2 - Q_targets))
         softq_gradients2 = qtape2.gradient(Q2_loss, self.soft_Q_network1.trainable_weights)
 
@@ -233,7 +233,7 @@ class SAC(modelFreeAgent.ModelFreeAgent):
         with tf.GradientTape() as tape:
             # actions = self.actorModel()
             actions, action_logprob = self.actor_network(states)
-            soft_Q = tf.math.minimum(self.soft_Q_network([states, actions]), self.soft_Q_network1([states, actions]))
+            soft_Q = tf.math.minimum(self.soft_Q_network([X_train]), self.soft_Q_network1([X_train]))
 
             # Calculating loss
             loss_policy = tf.reduce_mean(action_logprob - soft_Q)
@@ -264,20 +264,24 @@ class SAC(modelFreeAgent.ModelFreeAgent):
 
     def learn(self, mini_batch):
 
+        X_train = [np.zeros((self.batch_size,) + self.state_size), np.zeros((self.batch_size,) + (self.action_size,))]
+
         states = (np.zeros((self.batch_size,) + self.state_size))
-        actions = np.zeros((self.batch_size,) + (self.action_size,))
+        # actions = np.zeros((self.batch_size,) + (self.action_size,))
         next_states = (np.zeros((self.batch_size,) + self.state_size))
         rewards = np.zeros((self.batch_size,) + (self.action_size,))
         dones = np.zeros((self.batch_size,) + (self.action_size,))
 
         for index_rep, transition in enumerate(mini_batch):
+            X_train[0][index_rep] = transition.state
             states[index_rep] = transition.state
-            actions[index_rep] = self.create_one_hot(self.action_size, transition.action)
+            X_train[1][index_rep] = self.create_one_hot(self.action_size, transition.action)
+            # actions[index_rep] = self.create_one_hot(self.action_size, transition.action)
             next_states[index_rep] = transition.next_state
             rewards[index_rep] = transition.reward
             dones[index_rep] = transition.is_done
 
-        return states, actions, next_states, rewards, dones
+        return X_train, states, next_states, rewards, dones
 
     def predict(self, state, isTarget):
 
